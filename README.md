@@ -174,26 +174,42 @@ npm run test           # Executa testes unitários
 
 ```
 src/
-├── auth/              # Módulo de autenticação
-│   ├── dto/          # Data Transfer Objects
-│   ├── strategies/   # Estratégias Passport (JWT, Local)
-│   ├── auth.controller.ts
-│   ├── auth.service.ts
-│   └── auth.module.ts
-├── users/            # Módulo de usuários
-│   ├── dto/
-│   ├── users.controller.ts
-│   ├── users.service.ts
-│   └── users.module.ts
-├── common/           # Recursos compartilhados
-│   ├── decorators/   # Decorators customizados
-│   ├── filters/      # Exception filters
-│   ├── guards/       # Guards de autenticação/autorização
-│   ├── interceptors/ # Interceptors globais
-│   └── pipes/        # Pipes customizados
-├── config/           # Configuração da aplicação
-├── database/         # Configuração do Prisma
-└── repositories/     # Repositórios de dados
+├── main.ts                    # Ponto de entrada da aplicação
+├── app.module.ts              # Módulo raiz da aplicação
+├── core/                      # Módulo global com configurações e infraestrutura
+│   ├── config/                # Configuração da aplicação
+│   │   ├── app-config.module.ts
+│   │   └── configuration.ts
+│   ├── database/              # Configuração do Prisma
+│   │   ├── database.module.ts
+│   │   └── prisma.service.ts
+│   └── core.module.ts         # Módulo global (guards, filters, interceptors)
+├── modules/                   # Módulos de domínio de negócio
+│   ├── auth/                  # Módulo de autenticação
+│   │   ├── dto/               # Data Transfer Objects (in/out)
+│   │   ├── repositories/      # Repositórios de dados
+│   │   ├── services/          # Services do módulo
+│   │   ├── strategies/        # Estratégias Passport (JWT, Local)
+│   │   ├── auth.controller.ts
+│   │   ├── auth.service.ts
+│   │   ├── auth.service.spec.ts
+│   │   └── auth.module.ts
+│   └── users/                 # Módulo de usuários
+│       ├── dto/               # Data Transfer Objects (in/out)
+│       ├── repositories/      # Repositórios de dados
+│       ├── users.controller.ts
+│       ├── users.service.ts
+│       ├── users.service.spec.ts
+│       └── users.module.ts
+└── shared/                    # Recursos compartilhados
+    ├── decorators/            # Decorators customizados (@Public, @Roles, @CurrentUser)
+    ├── filters/               # Exception filters globais
+    ├── guards/                # Guards de autenticação/autorização
+    ├── interceptors/          # Interceptors globais
+    ├── services/              # Services compartilhados (PasswordHasher)
+    ├── types/                 # Types compartilhados
+    ├── utils/                 # Utilitários
+    └── shared.module.ts       # Módulo de recursos compartilhados
 ```
 
 ## 📚 Documentação Adicional

@@ -6,10 +6,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { AppModule } from './app.module';
-import { HttpExceptionFilter } from './common/filters/httpException.filter';
-import { PrismaExceptionFilter } from './common/filters/prismaException.filter';
-import { ValidationExceptionFilter } from './common/filters/validationException.filter';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -17,18 +13,6 @@ async function bootstrap() {
 
   // Global prefix for all routes
   app.setGlobalPrefix('api');
-
-  // Global interceptors (middlewares)
-  app.useGlobalInterceptors(
-    new LoggingInterceptor()
-  );
-
-  // Global exception filters
-  app.useGlobalFilters(
-    new HttpExceptionFilter(),
-    new PrismaExceptionFilter(),
-    new ValidationExceptionFilter(),
-  );
 
   // Global validation pipe
   app.useGlobalPipes(
