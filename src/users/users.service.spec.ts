@@ -7,11 +7,13 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { UserResponse } from '../auth/auth.service';
-import { PrismaService } from '../database/prisma.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { UserRepository } from '../repositories/user.repository';
+import { CreateRequestDto } from './dto/in/createRequest.dto';
+import { UpdateRequestDto } from './dto/in/updateRequest.dto';
+import { FindMeRequestDto } from './dto/in/findMeRequest.dto';
+import { FindManyRequestDto } from './dto/in/findManyRequest.dto';
 import { UsersService } from './users.service';
+import { UserProfileResponseDto } from './dto/out/userProfileResponse.dto';
 
 // Mock do bcrypt
 jest.mock('bcrypt');
@@ -19,7 +21,7 @@ const mockedBcrypt = bcrypt as jest.Mocked<typeof bcrypt>;
 
 describe('UsersService', () => {
   let service: UsersService;
-  let prismaService: PrismaService;
+  let userRepository: jest.Mocked<UserRepository>;
   let configService: jest.Mocked<ConfigService>;
 
   const mockUser = {
@@ -42,36 +44,38 @@ describe('UsersService', () => {
     updatedAt: new Date(),
   };
 
-  const mockUserResponse: UserResponse = {
+  const mockUserResponse = new UserProfileResponseDto({
     id: 'test-user-id',
     email: 'test@example.com',
     name: 'Test User',
     role: Role.USER,
     createdAt: mockUser.createdAt,
-  };
+    updatedAt: mockUser.updatedAt,
+  });
 
-  const mockAdminResponse: UserResponse = {
+  const mockAdminResponse = new UserProfileResponseDto({
     id: 'admin-user-id',
     email: 'admin@example.com',
     name: 'Admin User',
     role: Role.ADMIN,
     createdAt: mockAdmin.createdAt,
-  };
+    updatedAt: mockAdmin.updatedAt,
+  });
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         UsersService,
         {
-          provide: PrismaService,
+          provide: UserRepository,
           useValue: {
-            user: {
-              findUnique: jest.fn(),
-              findMany: jest.fn(),
-              create: jest.fn(),
-              update: jest.fn(),
-              delete: jest.fn(),
-            },
+            findById: jest.fn(),
+            findByEmail: jest.fn(),
+            findMany: jest.fn(),
+            count: jest.fn(),
+            create: jest.fn(),
+            update: jest.fn(),
+            delete: jest.fn(),
           },
         },
         {
@@ -84,7 +88,7 @@ describe('UsersService', () => {
     }).compile();
 
     service = module.get<UsersService>(UsersService);
-    prismaService = module.get(PrismaService);
+    userRepository = module.get(UserRepository);
     configService = module.get(ConfigService);
 
     // Reset mocks
@@ -98,22 +102,27 @@ describe('UsersService', () => {
   describe('findMe', () => {
     it('should return user profile', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      const findMeDto: FindMeRequestDto = {
+        id: 'test-user-id',
+        name: 'Test User',
+        email: 'test@example.com',
+        role: Role.USER,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      userRepository.findById.mockResolvedValue(mockUser);
 
       // Act
-      const result = await service.findMe('test-user-id');
+      const result = await service.findMe(findMeDto);
 
       // Assert
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: { id: 'test-user-id' },
-      });
+      expect(userRepository.findById).toHaveBeenCalledWith('test-user-id');
       expect(result).toMatchObject({
         id: mockUser.id,
         email: mockUser.email,
         name: mockUser.name,
         role: mockUser.role,
       });
-      // A senha é excluída pela classe UserEntity (class-transformer)
       expect(result).toHaveProperty('id');
       expect(result).toHaveProperty('email');
       expect(result).toHaveProperty('name');
@@ -121,127 +130,137 @@ describe('UsersService', () => {
 
     it('should throw NotFoundException when user does not exist', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      const findMeDto: FindMeRequestDto = {
+        id: 'non-existent-id',
+        name: 'Test User',
+        email: 'test@example.com',
+        role: Role.USER,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      userRepository.findById.mockResolvedValue(null);
 
       // Act & Assert
-      await expect(service.findMe('non-existent-id')).rejects.toThrow(
+      await expect(service.findMe(findMeDto)).rejects.toThrow(
         new NotFoundException('Usuário não encontrado'),
       );
     });
   });
 
-  describe('findAll', () => {
+  describe('findMany', () => {
     it('should return array of users', async () => {
       // Arrange
-      (prismaService.user.findMany as jest.Mock).mockResolvedValue([
-        mockUser,
-        mockAdmin,
-      ]);
+      const findManyDto: FindManyRequestDto = {
+        page: 1,
+        limit: 10,
+      };
+      userRepository.findMany.mockResolvedValue([mockUser, mockAdmin]);
+      userRepository.count.mockResolvedValue(2);
 
       // Act
-      const result = await service.findAll();
+      const result = await service.findMany(findManyDto);
 
       // Assert
-      expect(prismaService.user.findMany).toHaveBeenCalledWith({
-        skip: 0,
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(result).toHaveLength(2);
-      expect(result[0]).toHaveProperty('id');
-      expect(result[0]).toHaveProperty('email');
-      expect(result[1]).toHaveProperty('id');
-      expect(result[1]).toHaveProperty('email');
+      expect(userRepository.findMany).toHaveBeenCalledWith(
+        1,
+        10,
+        {
+          name: undefined,
+          email: undefined,
+          role: undefined,
+        },
+      );
+      expect(result.payload).toHaveLength(2);
+      expect(result.payload[0]).toHaveProperty('id');
+      expect(result.payload[0]).toHaveProperty('email');
+      expect(result.payload[1]).toHaveProperty('id');
+      expect(result.payload[1]).toHaveProperty('email');
     });
 
     it('should return users with custom pagination', async () => {
       // Arrange
-      const page = 2;
-      const limit = 5;
-      (prismaService.user.findMany as jest.Mock).mockResolvedValue([mockUser]);
+      const findManyDto: FindManyRequestDto = {
+        page: 2,
+        limit: 5,
+      };
+      userRepository.findMany.mockResolvedValue([mockUser]);
+      userRepository.count.mockResolvedValue(1);
 
       // Act
-      const result = await service.findAll(page, limit);
+      const result = await service.findMany(findManyDto);
 
       // Assert
-      expect(prismaService.user.findMany).toHaveBeenCalledWith({
-        skip: 5, // (page - 1) * limit = (2 - 1) * 5
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(result).toHaveLength(1);
+      expect(userRepository.findMany).toHaveBeenCalledWith(
+        2,
+        5,
+        {
+          name: undefined,
+          email: undefined,
+          role: undefined,
+        },
+      );
+      expect(result.payload).toHaveLength(1);
     });
 
-    it('should use default values when page and limit are undefined', async () => {
+    it('should apply filters when provided', async () => {
       // Arrange
-      (prismaService.user.findMany as jest.Mock).mockResolvedValue([mockUser]);
+      const findManyDto: FindManyRequestDto = {
+        page: 1,
+        limit: 10,
+        name: 'Test',
+        email: 'test@example.com',
+        role: Role.USER,
+      };
+      userRepository.findMany.mockResolvedValue([mockUser]);
+      userRepository.count.mockResolvedValue(1);
 
       // Act
-      const result = await service.findAll(undefined, undefined);
+      const result = await service.findMany(findManyDto);
 
       // Assert
-      expect(prismaService.user.findMany).toHaveBeenCalledWith({
-        skip: 0,
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-      });
+      expect(userRepository.findMany).toHaveBeenCalledWith(
+        1,
+        10,
+        {
+          name: ['Test'],
+          email: ['test@example.com'],
+          role: [Role.USER],
+        },
+      );
+      expect(result.payload).toHaveLength(1);
     });
   });
 
   describe('findOne', () => {
-    it('should return user when admin requests any user', async () => {
+    it('should return user when found', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      userRepository.findById.mockResolvedValue(mockUser);
 
       // Act
-      const result = await service.findOne('test-user-id', mockAdminResponse);
+      const result = await service.findOne('test-user-id');
 
       // Assert
+      expect(userRepository.findById).toHaveBeenCalledWith('test-user-id');
       expect(result).toMatchObject({
         id: mockUser.id,
         email: mockUser.email,
         name: mockUser.name,
       });
-    });
-
-    it('should return user when user requests their own profile', async () => {
-      // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
-
-      // Act
-      const result = await service.findOne('test-user-id', mockUserResponse);
-
-      // Assert
-      expect(result).toMatchObject({
-        id: mockUser.id,
-        email: mockUser.email,
-        name: mockUser.name,
-      });
-    });
-
-    it('should throw ForbiddenException when user tries to access another user profile', async () => {
-      // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockAdmin);
-
-      // Act & Assert
-      await expect(
-        service.findOne('admin-user-id', mockUserResponse),
-      ).rejects.toThrow(new ForbiddenException('Acesso negado'));
     });
 
     it('should throw NotFoundException when user does not exist', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      userRepository.findById.mockResolvedValue(null);
 
       // Act & Assert
       await expect(
-        service.findOne('non-existent-id', mockAdminResponse),
+        service.findOne('non-existent-id'),
       ).rejects.toThrow(new NotFoundException('Usuário não encontrado'));
     });
   });
 
   describe('create', () => {
-    const createUserDto: CreateUserDto = {
+    const createUserDto: CreateRequestDto = {
       email: 'newuser@example.com',
       name: 'New User',
       password: 'Password@123',
@@ -250,15 +269,15 @@ describe('UsersService', () => {
 
     it('should create user successfully', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      userRepository.findByEmail.mockResolvedValue(null);
       (configService.get as jest.Mock).mockReturnValue(10); // saltRounds
       mockedBcrypt.hash.mockResolvedValue('hashedPassword123' as never);
-      (prismaService.user.create as jest.Mock).mockResolvedValue({
+      userRepository.create.mockResolvedValue({
         id: 'new-user-id',
         email: createUserDto.email,
         name: createUserDto.name,
         password: 'hashedPassword123',
-        role: createUserDto.role,
+        role: createUserDto.role ?? Role.USER,
         createdAt: new Date(),
         updatedAt: new Date(),
       });
@@ -267,19 +286,14 @@ describe('UsersService', () => {
       const result = await service.create(createUserDto);
 
       // Assert
-      expect(prismaService.user.findUnique).toHaveBeenCalledWith({
-        where: { email: createUserDto.email },
-      });
+      expect(userRepository.findByEmail).toHaveBeenCalledWith(createUserDto.email);
       expect(bcrypt.hash).toHaveBeenCalledWith(createUserDto.password, 10);
-      expect(prismaService.user.create).toHaveBeenCalledWith({
-        data: {
-          email: createUserDto.email,
-          name: createUserDto.name,
-          password: 'hashedPassword123',
-          role: createUserDto.role,
-        },
+      expect(userRepository.create).toHaveBeenCalledWith({
+        email: createUserDto.email,
+        name: createUserDto.name,
+        password: 'hashedPassword123',
+        role: createUserDto.role,
       });
-      // A senha é excluída pela classe UserEntity (class-transformer)
       expect(result).toHaveProperty('id');
       expect(result).toHaveProperty('email');
       expect(result).toHaveProperty('name');
@@ -287,7 +301,7 @@ describe('UsersService', () => {
 
     it('should throw ConflictException when email already exists', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
+      userRepository.findByEmail.mockResolvedValue(mockUser);
 
       // Act & Assert
       await expect(service.create(createUserDto)).rejects.toThrow(
@@ -297,143 +311,128 @@ describe('UsersService', () => {
   });
 
   describe('update', () => {
-    const updateUserDto: UpdateUserDto = {
+    const updateUserDto: UpdateRequestDto = {
       name: 'Updated Name',
       email: 'updated@example.com',
     };
 
-    it('should update user when user updates their own profile', async () => {
+    it('should update user successfully', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockUser) // existingUser check
-        .mockResolvedValueOnce(null); // email check
-      (prismaService.user.update as jest.Mock).mockResolvedValue({
+      userRepository.findById.mockResolvedValue(mockUser);
+      userRepository.findByEmail.mockResolvedValue(null);
+      (configService.get as jest.Mock).mockReturnValue(10);
+      userRepository.update.mockResolvedValue({
         ...mockUser,
         ...updateUserDto,
       });
 
       // Act
-      const result = await service.update('test-user-id', updateUserDto, mockUserResponse);
+      const result = await service.update('test-user-id', updateUserDto);
 
       // Assert
-      expect(prismaService.user.update).toHaveBeenCalledWith({
-        where: { id: 'test-user-id' },
-        data: {
+      expect(userRepository.findById).toHaveBeenCalledWith('test-user-id');
+      expect(userRepository.findByEmail).toHaveBeenCalledWith(updateUserDto.email);
+      expect(userRepository.update).toHaveBeenCalledWith(
+        'test-user-id',
+        expect.objectContaining({
           name: updateUserDto.name,
           email: updateUserDto.email,
-        },
-      });
-      // A senha é excluída pela classe UserEntity (class-transformer)
+        }),
+      );
       expect(result).toHaveProperty('id');
       expect(result).toHaveProperty('email');
       expect(result).toHaveProperty('name');
     });
 
-    it('should update user when admin updates any user', async () => {
+    it('should update user with role when provided', async () => {
       // Arrange
       const updateWithRole = { ...updateUserDto, role: Role.ADMIN };
-      (prismaService.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockUser)
-        .mockResolvedValueOnce(null);
-      (prismaService.user.update as jest.Mock).mockResolvedValue({
+      userRepository.findById.mockResolvedValue(mockUser);
+      userRepository.findByEmail.mockResolvedValue(null);
+      (configService.get as jest.Mock).mockReturnValue(10);
+      userRepository.update.mockResolvedValue({
         ...mockUser,
         ...updateWithRole,
       });
 
       // Act
-      const result = await service.update('test-user-id', updateWithRole, mockAdminResponse);
+      const result = await service.update('test-user-id', updateWithRole);
 
       // Assert
-      expect(prismaService.user.update).toHaveBeenCalledWith({
-        where: { id: 'test-user-id' },
-        data: {
+      expect(userRepository.findByEmail).toHaveBeenCalledWith(updateWithRole.email);
+      expect(userRepository.update).toHaveBeenCalledWith(
+        'test-user-id',
+        expect.objectContaining({
           name: updateWithRole.name,
           email: updateWithRole.email,
           role: updateWithRole.role,
-        },
-      });
-    });
-
-    it('should throw ForbiddenException when user tries to update role', async () => {
-      // Arrange
-      const updateWithRole = { ...updateUserDto, role: Role.ADMIN };
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
-
-      // Act & Assert
-      await expect(
-        service.update('test-user-id', updateWithRole, mockUserResponse),
-      ).rejects.toThrow(
-        new ForbiddenException('Usuários não podem alterar o próprio papel'),
+        }),
       );
-    });
-
-    it('should throw ForbiddenException when user tries to update another user', async () => {
-      // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockAdmin);
-
-      // Act & Assert
-      await expect(
-        service.update('admin-user-id', updateUserDto, mockUserResponse),
-      ).rejects.toThrow(new ForbiddenException('Acesso negado'));
     });
 
     it('should throw NotFoundException when user does not exist', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      userRepository.findById.mockResolvedValue(null);
 
       // Act & Assert
       await expect(
-        service.update('non-existent-id', updateUserDto, mockAdminResponse),
+        service.update('non-existent-id', updateUserDto),
       ).rejects.toThrow(new NotFoundException('Usuário não encontrado'));
     });
 
-    it('should throw ConflictException when email is already in use', async () => {
+    it('should throw ConflictException when email is already in use by same user', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock)
-        .mockResolvedValueOnce(mockUser) // existingUser check
-        .mockResolvedValueOnce(mockAdmin); // email check
+      const emailToUpdate = updateUserDto.email!;
+      userRepository.findById.mockResolvedValue({
+        ...mockUser,
+        email: emailToUpdate,
+      });
 
       // Act & Assert
       await expect(
-        service.update('test-user-id', updateUserDto, mockUserResponse),
+        service.update('test-user-id', updateUserDto),
       ).rejects.toThrow(new ConflictException('Email já está em uso'));
+      expect(userRepository.findByEmail).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException when email is already in use by another user', async () => {
+      // Arrange
+      const emailToUpdate = updateUserDto.email!;
+      userRepository.findById.mockResolvedValue(mockUser);
+      userRepository.findByEmail.mockResolvedValue({
+        ...mockAdmin,
+        email: emailToUpdate,
+      });
+
+      // Act & Assert
+      await expect(
+        service.update('test-user-id', updateUserDto),
+      ).rejects.toThrow(new ConflictException('Email já está em uso'));
+      expect(userRepository.findByEmail).toHaveBeenCalledWith(emailToUpdate);
     });
   });
 
   describe('remove', () => {
     it('should remove user successfully', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockUser);
-      (prismaService.user.delete as jest.Mock).mockResolvedValue(mockUser);
+      userRepository.findById.mockResolvedValue(mockUser);
+      userRepository.delete.mockResolvedValue(mockUser);
 
       // Act
-      await service.remove('test-user-id', mockAdminResponse);
+      await service.remove('test-user-id');
 
       // Assert
-      expect(prismaService.user.delete).toHaveBeenCalledWith({
-        where: { id: 'test-user-id' },
-      });
-    });
-
-    it('should throw ForbiddenException when admin tries to delete themselves', async () => {
-      // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(mockAdmin);
-
-      // Act & Assert
-      await expect(
-        service.remove('admin-user-id', mockAdminResponse),
-      ).rejects.toThrow(
-        new ForbiddenException('Não é possível deletar sua própria conta'),
-      );
+      expect(userRepository.findById).toHaveBeenCalledWith('test-user-id');
+      expect(userRepository.delete).toHaveBeenCalledWith('test-user-id');
     });
 
     it('should throw NotFoundException when user does not exist', async () => {
       // Arrange
-      (prismaService.user.findUnique as jest.Mock).mockResolvedValue(null);
+      userRepository.findById.mockResolvedValue(null);
 
       // Act & Assert
       await expect(
-        service.remove('non-existent-id', mockAdminResponse),
+        service.remove('non-existent-id'),
       ).rejects.toThrow(new NotFoundException('Usuário não encontrado'));
     });
   });

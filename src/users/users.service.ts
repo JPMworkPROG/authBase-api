@@ -1,111 +1,127 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
-import { Role, User } from '@prisma/client';
-import { PrismaService } from '../database/prisma.service';
-import { UserResponse } from '../auth/auth.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
-import { UserEntity } from './entities/user.entity';
+import { UserRepository } from '../repositories/user.repository';
+import { CreateRequestDto } from './dto/in/createRequest.dto';
+import { UpdateRequestDto } from './dto/in/updateRequest.dto';
+import { FindManyRequestDto } from './dto/in/findManyRequest.dto';
+import { FindMeRequestDto } from './dto/in/findMeRequest.dto';
 import * as bcrypt from 'bcrypt';
 import { ConfigService } from '@nestjs/config';
+import { FindMeResponseDto } from './dto/out/findMeResponse.dto';
+import { FindOneResponseDto } from './dto/out/findOneResponse.dto';
+import { FindManyResponseDto } from './dto/out/findManyResponse.dto';
+import { CreateResponseDto } from './dto/out/createResponse.dto';
+import { UpdateResponseDto } from './dto/out/updateResponse.dto';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly userRepository: UserRepository,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Buscar perfil do usuário logado
    */
-  async findMe(userId: string): Promise<UserEntity> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
+  async findMe(findMeUserDto: FindMeRequestDto): Promise<FindMeResponseDto> {
+    this.logger.debug(`Buscando perfil do usuário: ${findMeUserDto.id}`);
+    const user = await this.userRepository.findById(findMeUserDto.id);
 
     if (!user) {
+      this.logger.warn(`Usuário não encontrado: ${findMeUserDto.id}`);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    return new UserEntity(user);
+    this.logger.debug(`Perfil do usuário ${findMeUserDto.id} recuperado com sucesso`);
+    return new FindMeResponseDto(user);
   }
 
   /**
-   * Listar todos os usuários (apenas ADMINs)
+   * Listar todos os usuários com filtros opcionais
    */
-  async findAll(page?: number, limit?: number): Promise<UserEntity[]> {
-    // Configuração padrão para paginação
-    const defaultLimit = 10;
-    const defaultPage = 1;
-    
-    const finalLimit = limit || defaultLimit;
-    const finalPage = page || defaultPage;
-    const skip = (finalPage - 1) * finalLimit;
+  async findMany(
+    findManyUserDto: FindManyRequestDto,
+  ): Promise<FindManyResponseDto> {
+    const finalPage = findManyUserDto.page;
+    const finalLimit = findManyUserDto.limit;
 
-    const users = await this.prisma.user.findMany({
-      skip,
-      take: finalLimit,
-      orderBy: { createdAt: 'desc' },
-    });
+    this.logger.debug(`Buscando usuários - página: ${finalPage}, limite: ${finalLimit}`);
 
-    return users.map((user) => new UserEntity(user));
+    // Construir objeto de filtros
+    const filters = {
+      name: findManyUserDto.name ? findManyUserDto.name.split(',') : undefined,
+      email: findManyUserDto.email ? findManyUserDto.email.split(',') : undefined,
+      role: findManyUserDto.role ? findManyUserDto.role.split(',') as ('USER' | 'ADMIN')[] : undefined,
+    };
+
+    if (filters.name || filters.email || filters.role) {
+      this.logger.debug(`Aplicando filtros: ${JSON.stringify(filters)}`);
+    }
+
+    const [users, total] = await Promise.all([
+      this.userRepository.findMany(finalPage, finalLimit, filters),
+      this.userRepository.count(filters),
+    ]);
+
+    const usersDto = users.map((user) => new FindOneResponseDto(user));
+
+    this.logger.debug(`Busca concluída: ${users.length} usuário(s) encontrado(s) de ${total} total`);
+    return new FindManyResponseDto(usersDto, finalPage, finalLimit, total);
   }
 
   /**
    * Buscar usuário por ID
    */
-  async findOne(id: string, currentUser: UserResponse): Promise<UserEntity> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
+  async findOne(id: string): Promise<FindOneResponseDto> {
+    this.logger.debug(`Buscando usuário por ID: ${id}`);
+    const user = await this.userRepository.findById(id);
 
     if (!user) {
+      this.logger.warn(`Usuário não encontrado: ${id}`);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Usuários comuns só podem ver seu próprio perfil
-    if (currentUser.role !== Role.ADMIN && currentUser.id !== id) {
-      throw new ForbiddenException('Acesso negado');
-    }
-
-    return new UserEntity(user);
+    this.logger.debug(`Usuário ${id} encontrado: ${user.email}`);
+    return new FindOneResponseDto(user);
   }
 
   /**
-   * Criar novo usuário (apenas ADMINs)
+   * Criar novo usuário
    */
-  async create(createUserDto: CreateUserDto): Promise<UserEntity> {
-    const { email, password, name, role } = createUserDto;
+  async create(createDto: CreateRequestDto): Promise<CreateResponseDto> {
+    const { email, password, name, role } = createDto;
+
+    this.logger.log(`Iniciando criação de usuário: ${email}`);
 
     // Verificar se o email já está em uso
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
-    });
+    const emailExists = await this.userRepository.findByEmail(email);
 
-    if (existingUser) {
+    if (emailExists) {
+      this.logger.warn(`Tentativa de criar usuário com email já existente: ${email}`);
       throw new ConflictException('Email já está em uso');
     }
 
     // Hash da senha
     const saltRounds = this.configService.get<number>('auth.saltRounds', 10);
+    this.logger.debug(`Gerando hash da senha com ${saltRounds} salt rounds`);
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Criar usuário
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        name,
-        password: hashedPassword,
-        role: role || Role.USER,
-      },
+    const user = await this.userRepository.create({
+      email,
+      name,
+      password: hashedPassword,
+      role,
     });
 
-    return new UserEntity(user);
+    this.logger.log(`Usuário criado com sucesso: ${user.id} (${user.email}) - Role: ${user.role}`);
+    return new CreateResponseDto(user);
   }
 
   /**
@@ -113,88 +129,69 @@ export class UsersService {
    */
   async update(
     id: string,
-    updateUserDto: UpdateUserDto,
-    currentUser: UserResponse,
-  ): Promise<UserEntity> {
+    updateUserDto: UpdateRequestDto
+  ): Promise<UpdateResponseDto> {
+    this.logger.log(`Iniciando atualização do usuário: ${id}`);
+
     // Verificar se o usuário existe
-    const existingUser = await this.prisma.user.findUnique({
-      where: { id },
-    });
+    const existingUser = await this.userRepository.findById(id);
 
     if (!existingUser) {
+      this.logger.warn(`Tentativa de atualizar usuário inexistente: ${id}`);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Verificar permissões
-    const isOwner = currentUser.id === id;
-    const isAdmin = currentUser.role === Role.ADMIN;
+    // Verificar se o email está sendo alterado
+    if (updateUserDto.email) {
+      if (updateUserDto.email === existingUser.email) {
+        this.logger.warn(`Tentativa de atualizar para o mesmo email: ${updateUserDto.email}`);
+        throw new ConflictException('Email já está em uso');
+      }
 
-    if (!isOwner && !isAdmin) {
-      throw new ForbiddenException('Acesso negado');
-    }
-
-    // Usuários comuns não podem alterar o próprio papel
-    if (isOwner && !isAdmin && updateUserDto.role) {
-      throw new ForbiddenException('Usuários não podem alterar o próprio papel');
-    }
-
-    // Verificar se o email está sendo alterado e se já existe
-    if (updateUserDto.email && updateUserDto.email !== existingUser.email) {
-      const emailInUse = await this.prisma.user.findUnique({
-        where: { email: updateUserDto.email },
-      });
-
-      if (emailInUse) {
+      // Verificar se o novo email já existe
+      this.logger.debug(`Verificando disponibilidade do novo email: ${updateUserDto.email}`);
+      const emailExists = await this.userRepository.findByEmail(updateUserDto.email);
+      if (emailExists) {
+        this.logger.warn(`Tentativa de atualizar para email já existente: ${updateUserDto.email}`);
         throw new ConflictException('Email já está em uso');
       }
     }
 
     // Preparar dados para atualização
-    const updateData: any = {
+    const updateData = {
       name: updateUserDto.name,
       email: updateUserDto.email,
+      password: updateUserDto.password ? await bcrypt.hash(updateUserDto.password, this.configService.get<number>('auth.saltRounds', 10)) : undefined,
+      role: updateUserDto.role,
     };
 
-    // Apenas admins podem alterar papéis
-    if (isAdmin && updateUserDto.role) {
-      updateData.role = updateUserDto.role;
-    }
-
-    // Hash da nova senha se fornecida
     if (updateUserDto.password) {
-      const saltRounds = this.configService.get<number>('auth.saltRounds', 10);
-      updateData.password = await bcrypt.hash(updateUserDto.password, saltRounds);
+      this.logger.debug(`Senha será atualizada para o usuário: ${id}`);
     }
 
     // Atualizar usuário
-    const updatedUser = await this.prisma.user.update({
-      where: { id },
-      data: updateData,
-    });
+    const updatedUser = await this.userRepository.update(id, updateData);
 
-    return new UserEntity(updatedUser);
+    this.logger.log(`Usuário ${id} atualizado com sucesso`);
+    return new UpdateResponseDto(updatedUser);
   }
 
   /**
-   * Remover usuário (apenas ADMINs)
+   * Remover usuário
    */
-  async remove(id: string, currentUser: UserResponse): Promise<void> {
+  async remove(id: string): Promise<void> {
+    this.logger.log(`Iniciando remoção do usuário: ${id}`);
+
     // Verificar se o usuário existe
-    const existingUser = await this.prisma.user.findUnique({
-      where: { id },
-    });
+    const existingUser = await this.userRepository.findById(id);
 
     if (!existingUser) {
+      this.logger.warn(`Tentativa de remover usuário inexistente: ${id}`);
       throw new NotFoundException('Usuário não encontrado');
     }
 
-    // Não permitir que admin delete a si mesmo
-    if (currentUser.id === id) {
-      throw new ForbiddenException('Não é possível deletar sua própria conta');
-    }
-
-    await this.prisma.user.delete({
-      where: { id },
-    });
+    this.logger.debug(`Removendo usuário: ${id} (${existingUser.email})`);
+    await this.userRepository.delete(id);
+    this.logger.log(`Usuário ${id} removido com sucesso`);
   }
 }
