@@ -1,60 +1,56 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'js-yaml';
 import { AppModule } from './app.module';
-import {
-  HttpExceptionFilter,
-  PrismaExceptionFilter,
-  ValidationExceptionFilter
-} from './common/filters';
-import {
-  LoggingInterceptor
-} from './common/interceptors';
+import { HttpExceptionFilter } from './common/filters/httpException.filter';
+import { PrismaExceptionFilter } from './common/filters/prismaException.filter';
+import { ValidationExceptionFilter } from './common/filters/validationException.filter';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
 
-  // Global interceptors (ordem importa - executados na ordem definida)
+  // Global prefix for all routes
+  app.setGlobalPrefix('api');
+
+  // Global interceptors (middlewares)
   app.useGlobalInterceptors(
     new LoggingInterceptor()
   );
 
-  // Global exception filters (ordem importa - do mais específico para o mais geral)
+  // Global exception filters
   app.useGlobalFilters(
     new HttpExceptionFilter(),
-    new ValidationExceptionFilter(),
     new PrismaExceptionFilter(),
+    new ValidationExceptionFilter(),
   );
 
   // Global validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
     }),
   );
 
-  // Swagger documentation
-  const config = new DocumentBuilder()
-    .setTitle('API REST com Autenticação JWT - NestJS')
-    .setDescription('API REST moderna para demonstrar autenticação JWT, CRUD de usuários, validação de dados e testes automatizados.')
-    .setVersion('1.0.0')
-    .addBearerAuth()
-    .setContact('Jean', '', 'jpm.work.prog@gmail.com')
-    .setLicense('MIT', 'https://opensource.org/licenses/MIT')
-    .addServer('http://localhost:8080', 'Servidor de desenvolvimento')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+  // Swagger documentation - carrega do arquivo openapi.yaml
+  const openApiPath = path.join(process.cwd(), 'documentation', 'openapi.yaml');
+  const openApiFile = fs.readFileSync(openApiPath, 'utf8');
+  const swaggerDocument = yaml.load(openApiFile) as any;
 
   const port = configService.get<number>('port') || 8080;
+  const baseUrl = process.env.DOMAIN_URL || `localhost`;
+
+  SwaggerModule.setup('api/docs', app, swaggerDocument);
+
   await app.listen(port);
 
-  console.log(`🚀 Application is running on: http://localhost:${port}`);
-  console.log(`📚 Swagger documentation: http://localhost:${port}/api/docs`);
+  console.log(`🚀 Application is running on: http://${baseUrl}:${port}`);
+  console.log(`📚 Swagger documentation: http://${baseUrl}:${port}/api/docs`);
 }
 bootstrap();

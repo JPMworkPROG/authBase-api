@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ErrorResponse } from './http-exception.filter';
+import { ErrorResponse } from './httpException.filter';
 
 /**
  * Filtro específico para exceções de validação
@@ -26,9 +26,9 @@ export class ValidationExceptionFilter implements ExceptionFilter {
     const exceptionResponse = exception.getResponse();
     // Verificar se é erro de validação do class-validator
     const isValidationError = this.isValidationError(exceptionResponse);
-    
+
     let message: string | string[];
-    
+
     if (isValidationError) {
       message = this.formatValidationErrors(exceptionResponse);
     } else {

@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { ErrorResponse } from './http-exception.filter';
+import { ErrorResponse } from './httpException.filter';
 
 /**
  * Filtro para capturar e tratar exceções específicas do Prisma
@@ -27,48 +27,48 @@ export class PrismaExceptionFilter implements ExceptionFilter {
 
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       const { code, meta } = exception;
-      
+
       switch (code) {
         case 'P2002':
           // Violação de constraint único
           status = HttpStatus.CONFLICT;
           message = this.extractUniqueConstraintMessage(meta);
           break;
-        
+
         case 'P2025':
           // Registro não encontrado
           status = HttpStatus.NOT_FOUND;
           message = 'Registro não encontrado';
           break;
-        
+
         case 'P2003':
           // Violação de chave estrangeira
           status = HttpStatus.BAD_REQUEST;
           message = 'Operação inválida - referência não encontrada';
           break;
-        
+
         case 'P2014':
           // Relação requerida violada
           status = HttpStatus.BAD_REQUEST;
           message = 'Operação inválida - dependência necessária';
           break;
-        
+
         default:
           status = HttpStatus.BAD_REQUEST;
           message = 'Erro na operação do banco de dados';
           this.logger.warn(`Prisma error code not mapped: ${code}`);
       }
-      
+
       this.logger.error(
         `Prisma Error [${code}]: ${exception.message}`,
         exception.stack,
       );
-      
+
     } else if (exception instanceof Prisma.PrismaClientValidationError) {
       // Erro de validação do Prisma
       status = HttpStatus.BAD_REQUEST;
       message = 'Dados inválidos fornecidos';
-      
+
       this.logger.error(
         `Prisma Validation Error: ${exception.message}`,
         exception.stack,
@@ -77,7 +77,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
       // Fallback para outros erros do Prisma
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Erro interno do banco de dados';
-      
+
       this.logger.error(
         `Unknown Prisma Error: ${String(exception)}`,
       );
@@ -101,7 +101,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
   private extractUniqueConstraintMessage(meta?: any): string {
     if (meta?.target) {
       const field = Array.isArray(meta.target) ? meta.target[0] : meta.target;
-      
+
       switch (field) {
         case 'email':
           return 'Email já está em uso';
@@ -111,7 +111,7 @@ export class PrismaExceptionFilter implements ExceptionFilter {
           return `${field} já está em uso`;
       }
     }
-    
+
     return 'Valor duplicado - registro já existe';
   }
 

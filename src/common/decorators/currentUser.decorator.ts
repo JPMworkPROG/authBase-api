@@ -1,12 +1,21 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import { UserResponse } from '../../auth/auth.service';
+
+
+type UserProfile = {
+  email: string;
+  name: string;
+  id: string;
+  role: 'USER' | 'ADMIN';
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 /**
  * Decorator para obter o usuário atual da requisição autenticada
  * Extrai os dados do usuário do request após validação JWT
  */
 export const CurrentUser = createParamDecorator(
-  (data: keyof UserResponse | undefined, ctx: ExecutionContext): UserResponse => {
+  (data: keyof UserProfile | undefined, ctx: ExecutionContext): UserProfile => {
     const request = ctx.switchToHttp().getRequest();
     const user = request.user;
 

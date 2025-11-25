@@ -6,6 +6,7 @@ dotenv.config();
 
 export interface Configuration {
   port: number;
+  domainUrl: string;
   database: {
     url: string;
   };
@@ -17,6 +18,7 @@ export interface Configuration {
   };
   auth: {
     saltRounds: number;
+    passwordResetExpires: string;
   };
   app: {
     environment: string;
@@ -30,15 +32,19 @@ export interface Configuration {
 export default (): Configuration => {
   try {
     const config: Configuration = {
-      port: env.get('PORT').default(8080).asPortNumber(),
-      
+      port: env.get('PORT')
+        .required()
+        .asPortNumber(),
+      domainUrl: env.get('DOMAIN_URL')
+        .required()
+        .asString(),
       database: {
         url: env
           .get('DATABASE_URL')
           .required()
           .asString(),
       },
-      
+
       jwt: {
         accessSecret: env
           .get('JWT_ACCESS_SECRET')
@@ -57,14 +63,18 @@ export default (): Configuration => {
           .default('7d')
           .asString(),
       },
-      
+
       auth: {
         saltRounds: env
           .get('BCRYPT_SALT_ROUNDS')
           .default(10)
           .asIntPositive(),
+        passwordResetExpires: env
+          .get('AUTH_PASSWORD_RESET_EXPIRES')
+          .default('1h')
+          .asString(),
       },
-      
+
       app: {
         environment: env
           .get('NODE_ENV')
