@@ -3,6 +3,7 @@ import {
   Controller,
   HttpCode,
   HttpStatus,
+  Logger,
   Post,
 } from '@nestjs/common';
 import { Public } from '@shared/decorators/public.decorator';
@@ -20,6 +21,8 @@ import { ResetPasswordResponseDto } from './dto/out/resetPasswordResponse.dto';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly authService: AuthService) { }
 
   @Post('register')
@@ -28,7 +31,10 @@ export class AuthController {
   async register(
     @Body() registerDto: RegisterRequestDto,
   ): Promise<RegisterResponseDto> {
-    return this.authService.register(registerDto);
+    this.logger.log(`📝 Register attempt for email: ${registerDto.email}`);
+    const result = await this.authService.register(registerDto);
+    this.logger.log(`✅ User registered successfully: ${result.user.id}`);
+    return result;
   }
 
 
@@ -38,7 +44,10 @@ export class AuthController {
   async login(
     @Body() loginDto: LoginRequestDto,
   ): Promise<LoginResponseDto> {
-    return this.authService.login(loginDto);
+    this.logger.log(`🔐 Login attempt for email: ${loginDto.email}`);
+    const result = await this.authService.login(loginDto);
+    this.logger.log(`✅ Login successful for user: ${result.user.id}`);
+    return result;
   }
 
   @Post('refresh')
@@ -47,7 +56,10 @@ export class AuthController {
   async refresh(
     @Body() refreshDto: RefreshRequestDto,
   ): Promise<RefreshResponseDto> {
-    return this.authService.refresh(refreshDto);
+    this.logger.log(`🔄 Token refresh requested`);
+    const result = await this.authService.refresh(refreshDto);
+    this.logger.log(`✅ Token refreshed successfully`);
+    return result;
   }
 
   @Post('requestPasswordReset')
@@ -56,7 +68,10 @@ export class AuthController {
   async requestPasswordReset(
     @Body() requestDto: RequestPasswordResetRequestDto,
   ): Promise<RequestPasswordResetResponseDto> {
-    return this.authService.requestPasswordReset(requestDto);
+    this.logger.log(`🔑 Password reset requested for email: ${requestDto.email}`);
+    const result = await this.authService.requestPasswordReset(requestDto);
+    this.logger.log(`✅ Password reset token generated`);
+    return result;
   }
 
   @Post('resetPassword')
@@ -65,6 +80,9 @@ export class AuthController {
   async resetPassword(
     @Body() resetDto: ResetPasswordRequestDto,
   ): Promise<ResetPasswordResponseDto> {
-    return this.authService.resetPassword(resetDto);
+    this.logger.log(`🔓 Password reset attempt with token`);
+    const result = await this.authService.resetPassword(resetDto);
+    this.logger.log(`✅ Password reset completed successfully`);
+    return result;
   }
 }
